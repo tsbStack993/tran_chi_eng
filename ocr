@@ -1,0 +1,109 @@
+import cv2
+import pytesseract
+import numpy as np
+import os
+from googletrans import Translator
+
+# --- Tesseract setup (adjust paths for your system) --- 5121
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+os.environ["TESSDATA_PREFIX"] = r"C:\Program Files\Tesseract-OCR\tessdata"
+
+# --- Translator ---
+translator = Translator()
+
+# --- Load EAST text detector (download model if not exists) ---
+# Download from: https://github.com/opencv/opencv_extra/blob/master/testdata/dnn/download_models.py
+east_model = "frozen_east_text_detection.pb"
+if not os.path.exists(east_model):
+    raise FileNotFoundError("EAST model not found! Download frozen_east_text_detection.pb")
+
+net = cv2.dnn.readNet(east_model)
+
+# --- Video input/output ---
+cap = cv2.VideoCapture("video.mp4")
+
+fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+out = cv2.VideoWriter('translated_video.mp4', fourcc, cap.get(cv2.CAP_PROP_FPS),
+                      (int(cap.get(3)), int(cap.get(4))))
+
+# --- Helper: decode EAST output into bounding boxes ---
+def decode_predictions(scores, geometry, scoreThresh=0.5):
+    detections = []
+    confidences = []
+    height, width = scores.shape[2:4]
+    for y in range(height):
+        scoresData = scores[0,0,y]
+        x0 = geometry[0,0,y]
+        x1 = geometry[0,1,y]
+        x2 = geometry[0,2,y]
+        x3 = geometry[0,3,y]
+        anglesData = geometry[0,4,y]
+        for x in range(width):
+            score = scoresData[x]
+            if score < scoreThresh:
+                continue
+            offsetX, offsetY = x*4.0, y*4.0
+            angle = anglesData[x]
+            cosA = np.cos(angle)
+            sinA = np.sin(angle)
+            h = x0[x] + x2[x]
+            w = x1[x] + x3[x]
+            endX = int(offsetX + cosA*x1[x] + sinA*x2[x])
+            endY = int(offsetY - sinA*x1[x] + cosA*x2[x])
+            startX = int(endX - w)
+            startY = int(endY - h)
+            detections.append((startX, startY, endX, endY))
+            confidences.append(float(score))
+    return detections, confidences
+
+# --- Process video ---
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    orig = frame.copy()
+    (H, W) = frame.shape[:2]
+
+    # Prepare input for EAST
+    blob = cv2.dnn.blobFromImage(frame, 1.0, (320, 320),
+                                 (123.68, 116.78, 103.94), True, False)
+    net.setInput(blob)
+    (scores, geometry) = net.forward(["feature_fusion/Conv_7/Sigmoid",
+                                      "feature_fusion/concat_3"])
+
+    # Decode predictions
+    rects, confidences = decode_predictions(scores, geometry)
+    indices = cv2.dnn.NMSBoxes(rects, confidences, 0.5, 0.4)
+
+    if len(indices) > 0:
+        for i in indices.flatten():
+            (startX, startY, endX, endY) = rects[i]
+
+            # Extract ROI safely
+            startX, startY = max(0, startX), max(0, startY)
+            endX, endY = min(W, endX), min(H, endY)
+
+            roi = orig[startY:endY, startX:endX]
+
+            # OCR Chinese → English
+            text = pytesseract.image_to_string(roi, lang="chi_sim").strip()
+            if text:
+                try:
+                    translated = translator.translate(text, src='zh-cn', dest='en').text
+                except Exception:
+                    translated = "[Translation Error]"
+
+                # Draw box + translated text
+                cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 255, 0), 2)
+                cv2.putText(frame, translated, (startX, startY - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
+
+    out.write(frame)
+    cv2.imshow("Translated Video", frame)
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+cap.release()
+out.release()
+cv2.destroyAllWindows()
