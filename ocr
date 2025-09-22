@@ -4,7 +4,7 @@ import numpy as np
 import os
 from googletrans import Translator
 
-# --- Tesseract setup (adjust paths for your system) --- 5121
+# --- Tesseract setup (adjust paths for your system) --- 5121  
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 os.environ["TESSDATA_PREFIX"] = r"C:\Program Files\Tesseract-OCR\tessdata"
 
