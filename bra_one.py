@@ -85,7 +85,7 @@ def generate_subtitles(audio_path, video_path):
         try:
             text_en = translator.translate(text_zh, src='zh-cn', dest='en').text
         except Exception:
-            text_en = text_zh  # fallback if translation fails
+            text_en = text_zh  # fallback if translation fa
 
         srt_content += f"{i+1}\n"
         srt_content += f"{format_time(start)} --> {format_time(end)}\n"
