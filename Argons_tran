@@ -14,7 +14,7 @@ SUB_DIR = "subtitles"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(SUB_DIR, exist_ok=True)
 
-# --- Setup Argos Translate ---
+# --- Setup Argos Translate --- g
 def setup_argos():
     argostranslate.package.update_package_index()
     available_packages = argostranslate.package.get_available_packages()
