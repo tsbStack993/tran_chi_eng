@@ -26,7 +26,7 @@ def setup_argos():
 
 setup_argos()
 
-# --- Device selection ---
+# --- Device selection --- g
 def get_device():
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0).lower()
