@@ -1,0 +1,124 @@
+import os
+import subprocess
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import torch
+import whisper
+from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
+
+from moviepy.config import change_settings
+
+change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
+
+
+# ----------- Helper: extract audio with ffmpeg -------------------
+def extract_audio(video_path, audio_path="audio.wav"):
+    cmd = [
+        "ffmpeg", "-y", "-i", video_path,
+        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path
+    ]
+    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return audio_path
+
+
+# ----------- Helper: generate captions --------------------------
+def generate_captions(video_path, model_size="medium"):
+    audio_path = extract_audio(video_path)
+    print("[INFO] Loading Whisper model:", model_size)
+    model = whisper.load_model(model_size, device="cuda")
+    model = model.to(dtype=torch.float32)
+    print("[INFO] Transcribing...")
+    result = model.transcribe(audio_path, fp16=False)
+    return result
+
+
+# ----------- Helper: burn captions into video --------------------
+def burn_captions(video_path, captions, output_path):
+    video = VideoFileClip(video_path)
+    subtitle_clips = []
+
+    for seg in captions['segments']:
+        start = seg['start']
+        end = seg['end']
+        text = seg['text'].strip()
+
+        # Create a caption clip
+        txt_clip = (TextClip(text,
+                             fontsize=42,
+                             color='white',
+                             font='Arial-Bold',
+                             method='caption',
+                             size=(int(video.w * 0.8), None),
+                             align='center')
+                    .set_start(start)
+                    .set_duration(end - start)
+                    .set_position(('center', 'bottom')))
+
+        subtitle_clips.append(txt_clip)
+
+    final = CompositeVideoClip([video] + subtitle_clips)
+    final.write_videofile(output_path, codec='libx264',
+                          audio_codec='aac', fps=30)
+
+
+# ------------------- GUI Application ----------------------------
+class CaptionApp:
+    def __init__(self, master):
+        self.master = master
+        master.title("Video Auto-Caption Editor")
+
+        self.label = tk.Label(master, text="Select a video file to caption:")
+        self.label.pack(pady=10)
+
+        self.select_btn = tk.Button(master, text="Select Video",
+                                    command=self.select_video)
+        self.select_btn.pack(pady=5)
+
+        self.caption_btn = tk.Button(master, text="Generate & Export Captioned Video",
+                                     command=self.process_video, state=tk.DISABLED)
+        self.caption_btn.pack(pady=10)
+
+        self.status = tk.Label(master, text="", fg="blue")
+        self.status.pack(pady=5)
+
+        self.video_path = ""
+        self.output_path = ""
+
+    def select_video(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.mkv *.mov *.avi")])
+        if file_path:
+            self.video_path = file_path
+            self.caption_btn.config(state=tk.NORMAL)
+            self.status.config(text=f"Selected: {os.path.basename(file_path)}")
+
+    def process_video(self):
+        if not self.video_path:
+            messagebox.showerror("Error", "Please select a video first.")
+            return
+
+        self.status.config(text="Processing... please wait")
+        self.master.update()
+
+        try:
+            captions = generate_captions(self.video_path, model_size="medium")
+            out_dir = "output"
+            os.makedirs(out_dir, exist_ok=True)
+            filename = os.path.splitext(os.path.basename(self.video_path))[0]
+            self.output_path = os.path.join(out_dir, f"{filename}_captioned.mp4")
+
+            burn_captions(self.video_path, captions, self.output_path)
+
+            self.status.config(text=f"Done! Saved: {self.output_path}")
+            messagebox.showinfo("Success", f"Captioned video saved to:\n{self.output_path}")
+
+        except Exception as e:
+            self.status.config(text="Error occurred!")
+            messagebox.showerror("Error", str(e))
+
+
+# ----------------- Run GUI --------------------------------------
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.geometry("400x200")
+    app = CaptionApp(root)
+    root.mainloop()
